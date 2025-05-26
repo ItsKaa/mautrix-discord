@@ -335,7 +335,16 @@ func (portal *Portal) getEmojiMXCByDiscordID(emojiID, name string, animated bool
 	var url, mimeType string
 	if animated {
 		url = discordgo.EndpointEmojiAnimated(emojiID)
-		mimeType = "image/gif"
+		// Some emojis are exclusively WEBP when uploaded in that format.
+		// WEBP will work for all animated emojis so prefer that over GIF.
+		url = strings.Replace(url, ".gif", ".webp?animated=true", 1)
+		// Check in case discordgo changes things.
+		if strings.ContainsAny(url, ".webp") {
+			mimeType = "image/webp"
+		} else {
+			mimeType = "image/gif"
+		}
+
 	} else {
 		url = discordgo.EndpointEmoji(emojiID)
 		mimeType = "image/png"
