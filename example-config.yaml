@@ -174,6 +174,8 @@ bridge:
     # This can be `never` to never cache, `unencrypted` to only cache unencrypted mxc uris, or `always` to cache everything.
     # If you have a media repo that generates non-unique mxc uris, you should set this to never.
     cache_media: unencrypted
+    # If the mxc uris are cached, specify the media lifetime in number of days, this should match the media_retention settings from the homeserver. 0 means unlimited.
+    cache_media_lifetime: 0
     # Settings for converting Discord media to custom mxc:// URIs instead of reuploading.
     # More details can be found at https://docs.mau.fi/bridges/go/discord/direct-media.html
     direct_media:

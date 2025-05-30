@@ -59,8 +59,9 @@ type BridgeConfig struct {
 
 	Proxy string `yaml:"proxy"`
 
-	CacheMedia  string      `yaml:"cache_media"`
-	DirectMedia DirectMedia `yaml:"direct_media"`
+	CacheMedia         string      `yaml:"cache_media"`
+	CacheMediaLifetime int         `yaml:"cache_media_lifetime"`
+	DirectMedia        DirectMedia `yaml:"direct_media"`
 
 	AnimatedSticker struct {
 		Target string `yaml:"target"`
