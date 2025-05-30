@@ -271,6 +271,20 @@ func (br *DiscordBridge) convertLottie(data []byte) ([]byte, string, error) {
 func (br *DiscordBridge) copyAttachmentToMatrix(intent *appservice.IntentAPI, url string, encrypt bool, meta AttachmentMeta) (returnDBFile *database.File, returnErr error) {
 	isCacheable := br.Config.Bridge.CacheMedia != "never" && (br.Config.Bridge.CacheMedia == "always" || !encrypt)
 	returnDBFile = br.DB.File.Get(url, encrypt)
+	if returnDBFile != nil && br.Config.Bridge.CacheMediaLifetime > 0 {
+		cacheDays := (int)(time.Since(returnDBFile.Timestamp).Abs().Hours() / 24)
+		isCacheExpired := cacheDays >= br.Config.Bridge.CacheMediaLifetime
+		if isCacheExpired {
+			returnDBFile.Delete()
+			br.ZLog.Info().
+				Int("days", cacheDays).
+				Str("id", returnDBFile.MXC.FileID).
+				Str("name", returnDBFile.EmojiName).
+				Msg("Deleted outdated emoji from cache")
+			returnDBFile = nil
+		}
+	}
+
 	if returnDBFile == nil {
 		transferKey := attachmentKey{url, encrypt}
 		once, _ := br.attachmentTransfers.GetOrSet(transferKey, &exsync.ReturnableOnce[*database.File]{})
