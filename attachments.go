@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"os/exec"
@@ -29,10 +30,11 @@ import (
 	"go.mau.fi/mautrix-discord/database"
 )
 
-func downloadDiscordAttachment(cli *http.Client, url string, maxSize int64) ([]byte, error) {
+func downloadDiscordAttachment(cli *http.Client, url string, maxSize int64) ([]byte, error, string) {
+	mimeType := ""
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, err, mimeType
 	}
 	for key, value := range discordgo.DroidDownloadHeaders {
 		req.Header.Set(key, value)
@@ -40,28 +42,30 @@ func downloadDiscordAttachment(cli *http.Client, url string, maxSize int64) ([]b
 
 	resp, err := cli.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, err, mimeType
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode > 300 {
 		data, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status %d downloading %s: %s", resp.StatusCode, url, data)
+		return nil, fmt.Errorf("unexpected status %d downloading %s: %s", resp.StatusCode, url, data), mimeType
 	}
 	if resp.Header.Get("Content-Length") != "" {
 		length, err := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse content length: %w", err)
+			return nil, fmt.Errorf("failed to parse content length: %w", err), mimeType
 		} else if length > maxSize {
-			return nil, fmt.Errorf("attachment too large (%d > %d)", length, maxSize)
+			return nil, fmt.Errorf("attachment too large (%d > %d)", length, maxSize), mimeType
 		}
-		return io.ReadAll(resp.Body)
+		bytes, err := io.ReadAll(resp.Body)
+		mimeType := http.DetectContentType(bytes)
+		return bytes, err, mimeType
 	} else {
 		var mbe *http.MaxBytesError
 		data, err := io.ReadAll(http.MaxBytesReader(nil, resp.Body, maxSize))
 		if err != nil && errors.As(err, &mbe) {
-			return nil, fmt.Errorf("attachment too large (over %d)", maxSize)
+			return nil, fmt.Errorf("attachment too large (over %d)", maxSize), mimeType
 		}
-		return data, err
+		return data, err, mimeType
 	}
 }
 
@@ -299,10 +303,35 @@ func (br *DiscordBridge) copyAttachmentToMatrix(intent *appservice.IntentAPI, ur
 				br.parallelAttachmentSemaphore.Release(attachmentSizeVal)
 			}()
 
+			// Remove extension from original URL.
+			urlNoExtension := url
+			urlParameters := ""
+			if meta.MimeType == "" {
+				extAndParams := strings.Split(filepath.Ext(url), "?")
+				if len(extAndParams) > 1 {
+					urlParameters = "?" + extAndParams[1]
+				}
+				// Remove the extension but keep the parameters
+				urlNoExtension = strings.TrimSuffix(url, extAndParams[0])
+			}
+
 			var data []byte
-			data, onceErr = downloadDiscordAttachment(http.DefaultClient, url, br.MediaConfig.UploadSize)
+			mimeType := ""
+			data, onceErr, mimeType = downloadDiscordAttachment(http.DefaultClient, urlNoExtension+urlParameters, br.MediaConfig.UploadSize)
 			if onceErr != nil {
 				return
+			}
+
+			if meta.MimeType == "" && mimeType != "" {
+				// Update Mime Type if it is not set and also update the URL mime-type
+				// that gets saved to the database so we can extract it from the URL stored in the cache.
+				meta.MimeType = mimeType
+				ext, err := mime.ExtensionsByType(mimeType)
+				if err == nil && len(ext) > 0 {
+					url = urlNoExtension + ext[0] + urlParameters
+				} else {
+					br.ZLog.Error().Err(err).Str("mimetype", mimeType).Msg("Failed to get extension type from mime.")
+				}
 			}
 
 			if meta.Converter != nil {
@@ -332,27 +361,27 @@ func (portal *Portal) getEmojiMXCByDiscordID(emojiID, name string, animated bool
 	if !mxc.IsEmpty() {
 		return mxc
 	}
-	var url, mimeType string
+	var url string
 	if animated {
 		url = discordgo.EndpointEmojiAnimated(emojiID)
 		// Some emojis are exclusively WEBP when uploaded in that format.
 		// WEBP will work for all animated emojis so prefer that over GIF.
 		url = strings.Replace(url, ".gif", ".webp?animated=true", 1)
 		// Check in case discordgo changes things.
-		if strings.ContainsAny(url, ".webp") {
-			mimeType = "image/webp"
-		} else {
-			mimeType = "image/gif"
-		}
+		// if strings.ContainsAny(url, ".webp") {
+		// 	mimeType = "image/webp"
+		// } else {
+		// 	mimeType = "image/gif"
+		// }
 
 	} else {
 		url = discordgo.EndpointEmoji(emojiID)
-		mimeType = "image/png"
+		// mimeType = "image/png"
 	}
 	dbFile, err := portal.bridge.copyAttachmentToMatrix(portal.MainIntent(), url, false, AttachmentMeta{
 		AttachmentID: emojiID,
-		MimeType:     mimeType,
-		EmojiName:    name,
+		// MimeType:     mimeType, // we now grab this from the URL.
+		EmojiName: name,
 	})
 	if err != nil {
 		portal.log.Warn().Err(err).Str("emoji_id", emojiID).Msg("Failed to copy emoji to Matrix")
