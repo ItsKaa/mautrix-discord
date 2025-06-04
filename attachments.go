@@ -318,9 +318,10 @@ func (br *DiscordBridge) copyAttachmentToMatrix(intent *appservice.IntentAPI, ur
 			}()
 
 			// Remove extension from original URL.
+			isDiscordEmojiOrSticker := strings.HasPrefix(url, discordgo.EndpointCDNStickers) || (strings.HasPrefix(url, discordgo.EndpointCDN) && strings.Contains(url, "/emojis/"))
 			urlNoExtension := url
 			urlParameters := ""
-			if meta.MimeType == "" {
+			if isDiscordEmojiOrSticker {
 				extAndParams := strings.Split(filepath.Ext(url), "?")
 				if len(extAndParams) > 1 {
 					urlParameters = "?" + extAndParams[1]
@@ -336,7 +337,7 @@ func (br *DiscordBridge) copyAttachmentToMatrix(intent *appservice.IntentAPI, ur
 				return
 			}
 
-			if meta.MimeType == "" && mimeType != "" {
+			if isDiscordEmojiOrSticker && strings.HasPrefix(mimeType, "image/") {
 				// Update Mime Type if it is not set and also update the URL mime-type
 				// that gets saved to the database so we can extract it from the URL stored in the cache.
 				meta.MimeType = mimeType
