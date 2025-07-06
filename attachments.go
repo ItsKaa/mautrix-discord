@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"image"
 	"io"
-	"mime"
 	"net/http"
 	"os"
 	"os/exec"
@@ -317,36 +316,18 @@ func (br *DiscordBridge) copyAttachmentToMatrix(intent *appservice.IntentAPI, ur
 				br.parallelAttachmentSemaphore.Release(attachmentSizeVal)
 			}()
 
-			// Remove extension from original URL.
-			isDiscordEmojiOrSticker := strings.HasPrefix(url, discordgo.EndpointCDNStickers) || (strings.HasPrefix(url, discordgo.EndpointCDN) && strings.Contains(url, "/emojis/"))
-			urlNoExtension := url
-			urlParameters := ""
-			if isDiscordEmojiOrSticker {
-				extAndParams := strings.Split(filepath.Ext(url), "?")
-				if len(extAndParams) > 1 {
-					urlParameters = "?" + extAndParams[1]
-				}
-				// Remove the extension but keep the parameters
-				urlNoExtension = strings.TrimSuffix(url, extAndParams[0])
-			}
-
 			var data []byte
 			mimeType := ""
-			data, onceErr, mimeType = downloadDiscordAttachment(http.DefaultClient, urlNoExtension+urlParameters, br.MediaConfig.UploadSize)
+			data, onceErr, mimeType = downloadDiscordAttachment(http.DefaultClient, url, br.MediaConfig.UploadSize)
 			if onceErr != nil {
 				return
 			}
 
-			if isDiscordEmojiOrSticker && strings.HasPrefix(mimeType, "image/") {
-				// Update Mime Type if it is not set and also update the URL mime-type
-				// that gets saved to the database so we can extract it from the URL stored in the cache.
+			// Use detected mime-type when it's a sticker or emoji.
+			isDiscordSticker := strings.HasPrefix(url, discordgo.EndpointCDNStickers)
+			isDiscordEmoji := strings.HasPrefix(url, discordgo.EndpointCDN) && strings.Contains(url, "/emojis/")
+			if (isDiscordSticker || isDiscordEmoji) && strings.HasPrefix(mimeType, "image/") {
 				meta.MimeType = mimeType
-				ext, err := mime.ExtensionsByType(mimeType)
-				if err == nil && len(ext) > 0 {
-					url = urlNoExtension + ext[0] + urlParameters
-				} else {
-					br.ZLog.Error().Err(err).Str("mimetype", mimeType).Msg("Failed to get extension type from mime.")
-				}
 			}
 
 			if meta.Converter != nil {
