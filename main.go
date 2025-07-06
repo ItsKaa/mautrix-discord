@@ -18,6 +18,7 @@ package main
 
 import (
 	_ "embed"
+	"github.com/bwmarrin/discordgo"
 	"net/http"
 	"sync"
 
@@ -161,6 +162,21 @@ func (br *DiscordBridge) CreatePrivatePortal(id id.RoomID, user bridge.User, gho
 }
 
 func main() {
+	// Update endpoints for stickers because cdn.discordapp may throw errors.
+	discordgo.EndpointCDNStickers = "https://media.discordapp.net/stickers/"
+	discordgo.EndpointSticker = func(sID string) string { return discordgo.EndpointStickers + sID + "?size=320" }
+	discordgo.EndpointStickerImage = func(sID string, format discordgo.StickerFormat) string {
+		var ext string
+		switch format {
+		case discordgo.StickerFormatTypePNG, discordgo.StickerFormatTypeAPNG:
+			ext = ".png"
+		case discordgo.StickerFormatTypeLottie:
+			ext = ".json"
+		case discordgo.StickerFormatTypeGIF:
+			ext = ".gif"
+		}
+		return discordgo.EndpointCDNStickers + sID + ext + "?size=320"
+	}
 	br := &DiscordBridge{
 		usersByMXID: make(map[id.UserID]*User),
 		usersByID:   make(map[string]*User),
